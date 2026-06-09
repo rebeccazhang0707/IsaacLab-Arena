@@ -33,10 +33,17 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
     name = "put_item_in_fridge_and_close_door"
 
     def get_env(self, args_cli: argparse.Namespace) -> IsaacLabArenaEnvironment:
+        import isaaclab.envs.mdp as mdp_isaac_lab
+        from dataclasses import MISSING
+
         from isaaclab.envs.mimic_env_cfg import MimicEnvCfg
+        from isaaclab.managers import ObservationGroupCfg as ObsGroup
+        from isaaclab.managers import ObservationTermCfg as ObsTerm
+        from isaaclab.managers import SceneEntityCfg
         from isaaclab.utils import configclass
 
         from isaaclab_arena.assets.object_reference import ObjectReference, OpenableObjectReference
+        from isaaclab_arena.tasks.observations import observations
         from isaaclab_arena.assets.object_set import RigidObjectSet
         from isaaclab_arena.embodiments.common.arm_mode import ArmMode
         from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArenaEnvironment
@@ -60,10 +67,18 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 self,
                 subtasks: list[TaskBase],
                 episode_length_s: float | None = None,
+                observation_cfg: object | None = None,
             ):
                 super().__init__(
                     subtasks=subtasks, episode_length_s=episode_length_s, desired_subtask_success_state=[True, True]
                 )
+                # Critic-only privileged obs (asymmetric AC). Held here so the env builder's
+                # combine_configclass_instances(scene, embodiment, task) picks it up as an extra
+                # observation group; None ⇒ task contributes no observations (legacy behaviour).
+                self._observation_cfg = observation_cfg
+
+            def get_observation_cfg(self):
+                return self._observation_cfg
 
             def get_viewer_cfg(self):
                 return self.subtasks[0].get_viewer_cfg()
@@ -178,8 +193,62 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
             reset_openness=0.5,
         )
 
+        # --- Asymmetric actor-critic: privileged critic-only observation group ---
+        # A single `critic_privileged` group fed ONLY to the SAC critic (the policy/proprio
+        # groups are unchanged). It carries the manipulated object's pose RELATIVE TO THE
+        # PLACEMENT TARGET (the fridge shelf) plus the fridge door joint angle — goal-centric,
+        # well-scaled signals for value learning. The shelf is a static reference (a fixed
+        # XForm with no runtime root_pose_w), so its pose is captured once here and rebuilt at
+        # runtime from env_origins; the door joint is read live from the fridge articulation.
+        shelf_pose = refrigerator_shelf.get_initial_pose()
+        shelf_pos = tuple(shelf_pose.position_xyz)
+        _qx, _qy, _qz, _qw = shelf_pose.rotation_xyzw  # arena Pose stores xyzw; Isaac math wants wxyz
+        shelf_quat_wxyz = (_qw, _qx, _qy, _qz)
+
+        @configclass
+        class PrivilegedObservationsCfg:
+            """Critic-only privileged observations for the put-and-close-door task."""
+
+            critic_privileged: ObsGroup = MISSING
+
+            def __init__(self, object_name: str, fridge_name: str, door_joint_name: str):
+                @configclass
+                class CriticPrivilegedCfg(ObsGroup):
+                    # Object pose (pos + quat = 7) in the fridge-shelf frame.
+                    object_pose = ObsTerm(
+                        func=observations.object_pose_in_static_frame,
+                        params={
+                            "object_cfg": SceneEntityCfg(object_name),
+                            "frame_pos": shelf_pos,
+                            "frame_quat_wxyz": shelf_quat_wxyz,
+                        },
+                    )
+                    # Fridge door joint angle (1), read live from the articulation.
+                    door_joint = ObsTerm(
+                        func=mdp_isaac_lab.joint_pos,
+                        params={"asset_cfg": SceneEntityCfg(fridge_name, joint_names=[door_joint_name])},
+                    )
+
+                    def __post_init__(self):
+                        self.enable_corruption = False
+                        self.concatenate_terms = True
+
+                self.critic_privileged = CriticPrivilegedCfg()
+
+        # NOTE: assumes a single rigid pickup object (the default). For --object_set the name
+        # resolves to a RigidObjectCollection whose pose API differs; extend the mdp term then.
+        privileged_observation_cfg = PrivilegedObservationsCfg(
+            object_name=pickup_object.name,
+            fridge_name=refrigerator.name,
+            door_joint_name="fridge_door_joint",
+        )
+
         # Create sequential task
-        sequential_task = PutAndCloseDoorTask(subtasks=[pick_and_place_task, close_door_task], episode_length_s=10.0)
+        sequential_task = PutAndCloseDoorTask(
+            subtasks=[pick_and_place_task, close_door_task],
+            episode_length_s=10.0,
+            observation_cfg=privileged_observation_cfg,
+        )
 
         # Create and return environment
         isaaclab_arena_environment = IsaacLabArenaEnvironment(

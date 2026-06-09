@@ -124,7 +124,6 @@ else
                     "--ulimit" "stack=-1"
                     "--ipc=host"
                     "--net=host"
-                    "--runtime=nvidia"
                     "--gpus=all"
                     "-v" ".:${WORKDIR}"
                     $(add_volume_if_it_exists $DATASETS_HOST_MOUNT_DIRECTORY /datasets)
@@ -134,12 +133,15 @@ else
                     "-v" "$HOME/.config/osmo:/home/$(id -un)/.config/osmo"
                     "-v" "$HOME/.cache:/home/$(id -un)/.cache"
                     "-v" "/tmp:/tmp"
+                    "-v" "$HOME/cuda128-compat:/opt/cuda128-compat:ro"
                     "-v" "/tmp/.X11-unix:/tmp/.X11-unix:rw"
                     "-v" "/var/run/docker.sock:/var/run/docker.sock"
                     "-v" "$HOME/.Xauthority:/root/.Xauthority"
                     # Mount host SSL certificate store so the container trusts CA certs
                     "-v" "/etc/ssl/certs:/etc/ssl/certs:ro"
                     "--env" "DISPLAY"
+                    "--env" "WANDB_API_KEY"
+                    "--env" "WANDB_MODE"
                     "--env" "ACCEPT_EULA=Y"
                     "--env" "PRIVACY_CONSENT=Y"
                     "--env" "DOCKER_RUN_USER_ID=$(id -u)"
@@ -175,7 +177,7 @@ else
         DOCKER_RUN_ARGS+=("-v" "./submodules/Isaac-GR00T:${WORKDIR}/submodules/Isaac-GR00T")
     fi
     # Allow X11 connections
-    xhost +local:docker > /dev/null
+    xhost +local:docker > /dev/null 2>&1 || true
 
     docker run "${DOCKER_RUN_ARGS[@]}" --interactive --rm --tty ${DOCKER_IMAGE_NAME}:${DOCKER_VERSION_TAG} "${@}"
 fi

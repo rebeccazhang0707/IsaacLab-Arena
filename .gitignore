@@ -90,3 +90,6 @@ core.*
 
 # Development and cache folders
 /__*
+
+# Local secrets (contains WANDB_API_KEY) - never commit
+setup_wandb_key.sh

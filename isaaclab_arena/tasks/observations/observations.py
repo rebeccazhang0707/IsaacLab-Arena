@@ -34,3 +34,39 @@ def object_position_in_frame(
         wp.to_torch(root_frame.data.root_pos_w), wp.to_torch(root_frame.data.root_quat_w), object_pos_w
     )
     return object_pos_b
+
+
+def object_pose_in_static_frame(
+    env: ManagerBasedRLEnv,
+    frame_pos: tuple[float, float, float],
+    frame_quat_wxyz: tuple[float, float, float, float],
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Object pose (position + quaternion) expressed in a STATIC scene frame.
+
+    Use this for a reference frame that never moves relative to the environment
+    origin (e.g. a fridge shelf the object must be placed on). Such a frame is not
+    a simulated rigid body / articulation, so it has no ``data.root_pose_w`` to read
+    at runtime; instead its world pose is reconstructed as
+    ``env.scene.env_origins + frame_pos`` (Isaac Lab environments differ only by a
+    per-env translation) with a constant orientation ``frame_quat_wxyz``.
+
+    Returns a ``(num_envs, 7)`` tensor ``[x, y, z, qw, qx, qy, qz]`` of the object
+    pose in that frame: translation/heading-invariant and well-scaled (≈ the
+    object→goal offset), which makes it a good asymmetric-critic privileged obs.
+
+    Args:
+        frame_pos: Frame position relative to the environment origin (meters).
+        frame_quat_wxyz: Constant frame orientation as a ``(w, x, y, z)`` quaternion.
+        object_cfg: Scene entity of the (rigid) object whose pose is reported.
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    object_pos_w = wp.to_torch(object.data.root_pos_w)[:, :3]
+    object_quat_w = wp.to_torch(object.data.root_quat_w)
+    device = object_pos_w.device
+    dtype = object_pos_w.dtype
+    num_envs = object_pos_w.shape[0]
+    frame_pos_w = env.scene.env_origins + torch.tensor(frame_pos, device=device, dtype=dtype)
+    frame_quat_w = torch.tensor(frame_quat_wxyz, device=device, dtype=dtype).unsqueeze(0).expand(num_envs, 4)
+    object_pos_f, object_quat_f = subtract_frame_transforms(frame_pos_w, frame_quat_w, object_pos_w, object_quat_w)
+    return torch.cat([object_pos_f, object_quat_f], dim=-1)

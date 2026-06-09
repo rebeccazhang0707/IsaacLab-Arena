@@ -70,3 +70,29 @@ def object_pose_in_static_frame(
     frame_quat_w = torch.tensor(frame_quat_wxyz, device=device, dtype=dtype).unsqueeze(0).expand(num_envs, 4)
     object_pos_f, object_quat_f = subtract_frame_transforms(frame_pos_w, frame_quat_w, object_pos_w, object_quat_w)
     return torch.cat([object_pos_f, object_quat_f], dim=-1)
+
+
+def object_position_in_static_frame(
+    env: ManagerBasedRLEnv,
+    frame_pos: tuple[float, float, float],
+    frame_quat_wxyz: tuple[float, float, float, float],
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Object POSITION in a STATIC scene frame (e.g. the fridge shelf) — the object→target
+    displacement, ``(num_envs, 3)``.
+
+    This is the well-scaled, goal-centric core of the asymmetric-critic privileged obs.
+    The orientation quaternion is INTENTIONALLY OMITTED: its double-cover (q ≡ -q) flips
+    sign discontinuously as the object rotates, which appears to the critic as input jumps
+    and drives TD-target / critic-loss spikes. Position-only is continuous and stable.
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    object_pos_w = wp.to_torch(object.data.root_pos_w)[:, :3]
+    object_quat_w = wp.to_torch(object.data.root_quat_w)
+    device = object_pos_w.device
+    dtype = object_pos_w.dtype
+    num_envs = object_pos_w.shape[0]
+    frame_pos_w = env.scene.env_origins + torch.tensor(frame_pos, device=device, dtype=dtype)
+    frame_quat_w = torch.tensor(frame_quat_wxyz, device=device, dtype=dtype).unsqueeze(0).expand(num_envs, 4)
+    object_pos_f, _ = subtract_frame_transforms(frame_pos_w, frame_quat_w, object_pos_w, object_quat_w)
+    return object_pos_f

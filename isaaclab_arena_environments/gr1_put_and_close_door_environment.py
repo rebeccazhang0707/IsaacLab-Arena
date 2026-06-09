@@ -215,8 +215,8 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 @configclass
                 class CriticPrivilegedCfg(ObsGroup):
                     # Object pose (pos + quat = 7) in the fridge-shelf frame.
-                    object_pose = ObsTerm(
-                        func=observations.object_pose_in_static_frame,
+                    object_pos = ObsTerm(
+                        func=observations.object_position_in_static_frame,
                         params={
                             "object_cfg": SceneEntityCfg(object_name),
                             "frame_pos": shelf_pos,

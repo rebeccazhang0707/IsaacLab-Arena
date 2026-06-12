@@ -114,10 +114,19 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 for key, value in MIMIC_DATAGEN_CONFIG_DEFAULTS.items():
                     setattr(self.datagen_config, key, value)
 
-        camera_offset = Pose(position_xyz=(0.12515, 0.0, 0.06776), rotation_xyzw=(0.11204, -0.17712, -0.79108, 0.57469))
+        # Head-camera offset tuned so a single view captures both the ranch bottle on the
+        # counter and the interior of the fridge on the robot's right: the camera is turned
+        # ~22 deg to the right and shifted slightly right for 6cm (head_yaw_link frame, opengl).
+        camera_offset = Pose(
+            position_xyz=(0.12515, -0.06, 0.06776),
+            rotation_xyzw=(-0.04096, -0.28352, -0.79792, 0.53034),
+        )
         embodiment = self.asset_registry.get_asset_by_name(args_cli.embodiment)(
             enable_cameras=args_cli.enable_cameras, camera_offset=camera_offset
         )
+        # Slightly widen the field of view (lower focal length) so both targets fit in frame.
+        if hasattr(embodiment, "camera_config") and hasattr(embodiment.camera_config, "robot_pov_cam"):
+            embodiment.camera_config.robot_pov_cam.spawn.focal_length = 13.0
         kitchen_background = self.asset_registry.get_asset_by_name("lightwheel_robocasa_kitchen")(
             style_id=args_cli.kitchen_style
         )

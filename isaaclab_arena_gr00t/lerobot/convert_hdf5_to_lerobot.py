@@ -525,21 +525,22 @@ def convert_hdf5_to_lerobot(config: Gr00tDatasetConfig):
             "tasks": [tasks[task_index] for task_index in df_ret_dict["annotation"]],
             "length": length,
         })
-        # 2.3. Generate videos/
-        new_video_relpath = config.video_path.format(
-            episode_chunk=episode_chunk, video_key=config.lerobot_keys["video"], episode_index=episode_index
-        )
-        new_video_path = config.lerobot_data_dir / new_video_relpath
-        if config.video_name_lerobot not in video_paths.keys():
-            video_paths[config.video_name_lerobot] = new_video_path
+        # 2.3. Generate videos/ -- one video per configured camera (e.g. ego_view + wrist_view)
+        for video_key_lerobot, sim_cam_key in config.camera_map.items():
+            new_video_relpath = config.video_path.format(
+                episode_chunk=episode_chunk, video_key=video_key_lerobot, episode_index=episode_index
+            )
+            new_video_path = config.lerobot_data_dir / new_video_relpath
+            if video_key_lerobot not in video_paths.keys():
+                video_paths[video_key_lerobot] = new_video_path
 
-        assert config.pov_cam_name_sim in trajectory["camera_obs"]
+            assert sim_cam_key in trajectory["camera_obs"], f"{sim_cam_key} not found in camera_obs"
 
-        frames = np.array(trajectory["camera_obs"][config.pov_cam_name_sim])
-        # remove last frame due to how Lab reports observations
-        frames = frames[:-1]
-        assert len(frames) == length
-        queue.put((new_video_path, frames, config.fps, "image"))
+            frames = np.array(trajectory["camera_obs"][sim_cam_key])
+            # remove last frame due to how Lab reports observations
+            frames = frames[:-1]
+            assert len(frames) == length
+            queue.put((new_video_path, frames, config.fps, "image"))
 
         if example_data is None:
             example_data = df_ret_dict
@@ -575,7 +576,7 @@ def convert_hdf5_to_lerobot(config: Gr00tDatasetConfig):
             total_episodes=len(trajectory_ids),
             total_frames=total_length,
             total_tasks=len(tasks),
-            total_videos=len(trajectory_ids),
+            total_videos=len(trajectory_ids) * len(config.camera_map),
             total_chunks=len(trajectory_ids) // config.chunks_size,
             step_data=example_data["data"],
             video_paths=video_paths,

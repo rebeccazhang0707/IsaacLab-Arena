@@ -90,6 +90,23 @@ docker exec -e HDF5_USE_FILE_LOCKING=FALSE isaaclab_arena-latest bash -c \
 
 ---
 
+## Cameras
+
+The `put_item_in_fridge_and_close_door` environment renders **two** cameras when `--enable_cameras`
+is set:
+
+| Camera | Observation key | Mounted on | Purpose |
+|--------|-----------------|------------|---------|
+| Head point-of-view | `robot_pov_cam_rgb` | `head_yaw_link` | Main task view (counter + fridge). |
+| Right wrist | `right_wrist_cam_rgb` | `right_hand_roll_link` | Close-up of the fridge interior / the bottle being placed. |
+
+Both views are recorded into the output dataset and (with `--save_video`) saved as separate mp4s.
+The wrist-camera mounting pose is a tuned approximation defined by `_DEFAULT_WRIST_CAMERA_OFFSET` /
+`GR1T2WristCameraCfg` in `isaaclab_arena/embodiments/gr1t2/gr1t2.py`; if the framing is off, adjust
+that offset and re-run a few episodes with `--save_video` to inspect the result.
+
+---
+
 ## Arguments (added by this script)
 
 | Flag | Default | Description |
@@ -112,9 +129,13 @@ positional task name, embodiment flags, etc.
 ## Output
 
 - **Dataset**: `--output_file` HDF5 containing only successful replays, each with the new camera
-  observations. Demo groups keep their original source indices (gaps mark dropped demos).
-- **Videos** (if `--save_video`): one mp4 per successful demo in `--video_dir`, named by source
-  index; failed demos go to `<video_dir>/failed/` when `--keep_failed_videos` is set.
+  observations. Demo groups keep their original source indices (gaps mark dropped demos). When the
+  environment exposes more than one camera (see *Cameras* below), every camera observation is
+  recorded — e.g. both `camera_obs/robot_pov_cam_rgb` and `camera_obs/right_wrist_cam_rgb`.
+- **Videos** (if `--save_video`): one mp4 **per camera** per successful demo in `--video_dir`. The
+  head point-of-view camera keeps the bare `demo_<id>.mp4` name; each additional camera is suffixed
+  with its name, e.g. `demo_<id>_right_wrist_cam.mp4`. Failed demos go to `<video_dir>/failed/`
+  when `--keep_failed_videos` is set.
 - **Console summary** at the end:
 
   ```

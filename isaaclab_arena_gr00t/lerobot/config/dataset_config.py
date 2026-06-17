@@ -52,6 +52,10 @@ class Gr00tDatasetConfig:
     pov_cam_name_sim: str = field(
         default="robot_head_cam", metadata={"description": "Name of the POV camera in the HDF5 file."}
     )
+    wrist_cam_name_sim: str = field(
+        default=None,
+        metadata={"description": "Name of an optional second (e.g. wrist) camera in the HDF5 file."},
+    )
     # Gr00t-LeRobot datafield
     state_name_lerobot: str = field(
         default="observation.state", metadata={"description": "Name of the state in the LeRobot file."}
@@ -65,6 +69,10 @@ class Gr00tDatasetConfig:
 
     video_name_lerobot: str = field(
         default="observation.images.ego_view", metadata={"description": "Name of the video in the LeRobot file."}
+    )
+    wrist_video_name_lerobot: str = field(
+        default="observation.images.wrist_view",
+        metadata={"description": "Name of the optional second (wrist) camera video in the LeRobot file."},
     )
     task_description_lerobot: str = field(
         default="annotation.human.action.task_description",
@@ -185,6 +193,13 @@ class Gr00tDatasetConfig:
             "video": self.video_name_lerobot,
             "annotation": (self.task_description_lerobot,),
         }
+
+        # Ordered map of {LeRobot video key: HDF5 camera_obs key}. Always includes the POV/head
+        # camera; the optional wrist camera is appended when configured. The converter writes one
+        # video per entry, so multiple cameras (e.g. ego_view + wrist_view) are all exported.
+        self.camera_map = {self.video_name_lerobot: self.pov_cam_name_sim}
+        if self.wrist_cam_name_sim:
+            self.camera_map[self.wrist_video_name_lerobot] = self.wrist_cam_name_sim
         if "left_eef_pos" in self.hdf5_keys:
             self.lerobot_keys["obs_eef_pose"] = "observation.eef_pose"
             self.lerobot_keys["action_eef_pose"] = "action.eef_pose"

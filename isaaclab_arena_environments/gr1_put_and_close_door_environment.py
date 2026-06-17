@@ -124,6 +124,18 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
         embodiment = self.asset_registry.get_asset_by_name(args_cli.embodiment)(
             enable_cameras=args_cli.enable_cameras, camera_offset=camera_offset
         )
+        # Add a right-wrist camera (in addition to the head POV camera) so that replayed demos also
+        # capture a close-up of the fridge interior and the bottle being placed. The extra view is
+        # exposed as camera_obs["right_wrist_cam_rgb"] and recorded alongside the head camera.
+        if args_cli.enable_cameras and hasattr(embodiment, "camera_config"):
+            from isaaclab_arena.embodiments.gr1t2.gr1t2 import GR1T2WristCameraCfg
+
+            wrist_cam_config = GR1T2WristCameraCfg()
+            # Mirror the head-camera settings the embodiment applied to its default camera config.
+            wrist_cam_config._is_tiled_camera = getattr(embodiment.camera_config, "_is_tiled_camera", False)
+            wrist_cam_config._camera_offset = getattr(embodiment.camera_config, "_camera_offset", camera_offset)
+            wrist_cam_config.__post_init__()
+            embodiment.camera_config = wrist_cam_config
         # Slightly widen the field of view (lower focal length) so both targets fit in frame.
         if hasattr(embodiment, "camera_config") and hasattr(embodiment.camera_config, "robot_pov_cam"):
             embodiment.camera_config.robot_pov_cam.spawn.focal_length = 13.0

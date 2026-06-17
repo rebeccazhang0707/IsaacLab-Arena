@@ -317,8 +317,10 @@ def main():  # noqa: C901
 
     # Track the source demo index currently loaded in each env (for export naming and video naming).
     current_demo_ids: dict[int, int | None] = {index: None for index in range(num_envs)}
-    # Per-env list of point-of-view camera frames for the current episode (for video saving).
-    episode_frames: dict[int, list] = {index: [] for index in range(num_envs)}
+    # Per-env, per-camera list of frames for the current episode (for video saving). Each env maps a
+    # camera observation key (e.g. "robot_pov_cam_rgb", "right_wrist_cam_rgb") to its list of frames,
+    # so every camera in the env produces its own video.
+    episode_frames: dict[int, dict[str, list]] = {index: {} for index in range(num_envs)}
     # Per-env replay-success tracking: whether the success condition was ever met during the episode,
     # and how many steps ago it last held (an episode counts as a successful replay if the task succeeded
     # within the final ``--num_success_steps`` steps, i.e. the replayed trajectory ends in the goal state).
@@ -331,15 +333,18 @@ def main():  # noqa: C901
     # Frame rate for saved videos derived from the (possibly overridden) control step duration.
     video_fps = round(1.0 / env.step_dt) if getattr(env, "step_dt", 0) else 30
 
-    def capture_pov_frame(env_id: int) -> None:
-        """Append the current point-of-view camera frame for ``env_id`` to its episode buffer."""
+    def capture_camera_frames(env_id: int) -> None:
+        """Append the current frame of every camera for ``env_id`` to its per-camera episode buffer.
+
+        Captures all cameras present in ``camera_obs`` (e.g. the head point-of-view camera and the
+        right-wrist camera) so each one is written out as its own video.
+        """
         camera_obs = env.obs_buf.get("camera_obs") if isinstance(env.obs_buf, dict) else None
         if not camera_obs:
             return
-        # Prefer the robot point-of-view camera; otherwise fall back to the first available camera.
-        key = "robot_pov_cam_rgb" if "robot_pov_cam_rgb" in camera_obs else next(iter(camera_obs))
-        frame = camera_obs[key][env_id, ..., :3]
-        episode_frames[env_id].append(frame.detach().cpu().numpy().astype(np.uint8))
+        for key, value in camera_obs.items():
+            frame = value[env_id, ..., :3]
+            episode_frames[env_id].setdefault(key, []).append(frame.detach().cpu().numpy().astype(np.uint8))
 
     def evaluate_success(env_id: int) -> None:
         """Evaluate the task-success term for ``env_id`` and update its replay-success trackers.
@@ -378,15 +383,21 @@ def main():  # noqa: C901
             )
             env.recorder_manager.export_episodes([env_id], demo_ids=[demo_id])
         if video_enabled and episode_frames[env_id]:
-            if succeeded:
-                video_path = os.path.join(video_dir, f"demo_{demo_id}.mp4")
-                imageio.mimwrite(video_path, episode_frames[env_id], fps=video_fps, macro_block_size=None)
-                print(f"      saved video: {video_path} ({len(episode_frames[env_id])} frames)")
-            elif args_cli.keep_failed_videos:
-                video_path = os.path.join(failed_video_dir, f"demo_{demo_id}.mp4")
-                imageio.mimwrite(video_path, episode_frames[env_id], fps=video_fps, macro_block_size=None)
-                print(f"      saved FAILED video: {video_path} ({len(episode_frames[env_id])} frames)")
-        episode_frames[env_id] = []
+            write_dir = video_dir if succeeded else (failed_video_dir if args_cli.keep_failed_videos else None)
+            if write_dir is not None:
+                status_label = "video" if succeeded else "FAILED video"
+                # Write one video per camera. The head point-of-view camera keeps the bare
+                # "demo_<id>.mp4" name; any additional camera (e.g. the right-wrist camera) is
+                # suffixed with its name so the views are easy to tell apart.
+                for cam_key, frames in episode_frames[env_id].items():
+                    if not frames:
+                        continue
+                    cam_name = cam_key[: -len("_rgb")] if cam_key.endswith("_rgb") else cam_key
+                    suffix = "" if cam_key == "robot_pov_cam_rgb" else f"_{cam_name}"
+                    video_path = os.path.join(write_dir, f"demo_{demo_id}{suffix}.mp4")
+                    imageio.mimwrite(video_path, frames, fps=video_fps, macro_block_size=None)
+                    print(f"      saved {status_label}: {video_path} ({len(frames)} frames)")
+        episode_frames[env_id] = {}
         ever_success[env_id] = False
         steps_since_success[env_id] = _NEVER
         current_demo_ids[env_id] = None
@@ -452,7 +463,7 @@ def main():  # noqa: C901
                         continue
                     evaluate_success(env_id)
                     if video_enabled:
-                        capture_pov_frame(env_id)
+                        capture_camera_frames(env_id)
 
                 if state_validation_enabled:
                     state_from_dataset = env_episode_data_map[0].get_next_state()

@@ -79,6 +79,12 @@ ARM_JOINT_NAMES_LIST = [
 # Default camera offset pose
 _DEFAULT_CAMERA_OFFSET = Pose(position_xyz=(0.12515, 0.0, 0.06776), rotation_xyzw=(0.32, -0.32, -0.63, 0.62))
 
+# Default offset for the optional right-wrist camera (in the ``right_hand_roll_link`` frame,
+# opengl convention).
+_DEFAULT_WRIST_CAMERA_OFFSET = Pose(
+    position_xyz=(-0.092, 0.0172, -0.014), rotation_xyzw=(-0.4117, 0.2053, 0.6767, -0.5749)
+)
+
 
 @register_asset
 class GR1T2EmbodimentBase(EmbodimentBase):
@@ -387,6 +393,52 @@ class GR1T2CameraCfg:
         )
 
         self.robot_pov_cam = CameraClass(offset=offset, **common_kwargs)
+
+
+@configclass
+class GR1T2WristCameraCfg(GR1T2CameraCfg):
+    """GR1T2 camera config with an extra camera mounted on the robot's right wrist/hand.
+
+    In addition to the head point-of-view camera (``robot_pov_cam``), this config adds a
+    ``right_wrist_cam`` attached to ``right_hand_roll_link``. The wrist view gives a close-up of
+    whatever the right hand is manipulating -- useful, for example, to clearly see an object being
+    placed inside a refrigerator. Both camera observations are exposed automatically as
+    ``camera_obs["robot_pov_cam_rgb"]`` and ``camera_obs["right_wrist_cam_rgb"]``.
+
+    Only environments that explicitly opt in use this config; the default :class:`GR1T2CameraCfg`
+    (single head camera) is unchanged so existing single-camera environments are unaffected.
+    """
+
+    right_wrist_cam: CameraCfg | TiledCameraCfg = MISSING
+
+    def __post_init__(self):
+        # Build the head point-of-view camera exactly as the base config does. Call the base
+        # implementation explicitly (not zero-arg ``super()``): the combine-configclass machinery
+        # re-binds this ``__post_init__`` onto a dynamically generated class, so ``super()`` would
+        # fail because ``self`` is no longer a ``GR1T2WristCameraCfg`` instance.
+        GR1T2CameraCfg.__post_init__(self)
+
+        # Match the camera backend (regular vs. tiled) chosen by the embodiment.
+        is_tiled_camera = getattr(self, "_is_tiled_camera", True)
+        wrist_camera_offset = getattr(self, "_wrist_camera_offset", _DEFAULT_WRIST_CAMERA_OFFSET)
+
+        CameraClass = TiledCameraCfg if is_tiled_camera else CameraCfg
+        OffsetClass = CameraClass.OffsetCfg
+
+        self.right_wrist_cam = CameraClass(
+            prim_path="{ENV_REGEX_NS}/Robot/right_hand_roll_link/RightWristCam",
+            update_period=0.0,
+            height=512,
+            width=512,
+            data_types=["rgb"],
+            # Wider FOV so the gripper, the bottle and some fridge context all fit in frame.
+            spawn=sim_utils.PinholeCameraCfg(focal_length=12.0, clipping_range=(0.01, 1.0e5)),
+            offset=OffsetClass(
+                pos=wrist_camera_offset.position_xyz,
+                rot=wrist_camera_offset.rotation_xyzw,
+                convention="opengl",
+            ),
+        )
 
 
 # NOTE(alexmillane, 2025.07.25): This is partially copied from pickplace_gr1t2_env_cfg.py

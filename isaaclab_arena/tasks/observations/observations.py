@@ -72,6 +72,50 @@ def object_pose_in_static_frame(
     return torch.cat([object_pos_f, object_quat_f], dim=-1)
 
 
+def object_uprightness(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    upright_axis_name: str = "z",
+) -> torch.Tensor:
+    """Cosine of the object's tilt from vertical — ``(num_envs, 1)`` in ``[-1, 1]``.
+
+    Rotates the object's local ``upright_axis_name`` axis into the world frame and returns
+    its world-Z component: ``+1`` perfectly upright, ``0`` lying on its side, ``-1`` upside
+    down. YAW-INVARIANT — spinning the object about its vertical axis leaves the value
+    unchanged; only roll/pitch (real tipping) lowers it.
+
+    Reuses the Placeable affordance's :func:`get_object_axis_in_world_frame` helper so the
+    geometry matches Arena's ``is_placed_upright`` / ``place_upright`` (a continuous version
+    of that boolean check), and works on ANY rigid object by name — the object need not carry
+    the Placeable affordance (the ranch bottle does not). Used both as an asymmetric-critic
+    privileged obs (the critic sees an incipient tip before the head camera can) and, via
+    :func:`object_tilt_penalty`, as a dense RL shaping signal. ``upright_axis_name`` selects
+    which body axis is the object's "up" (default +Z; true for the standing ranch bottle).
+    """
+    from isaaclab_arena.affordances.placeable import get_object_axis_in_world_frame
+
+    obj: RigidObject = env.scene[object_cfg.name]
+    quat = wp.to_torch(obj.data.root_quat_w)  # (N, 4) wxyz (Isaac convention)
+    axis_world = get_object_axis_in_world_frame(quat, upright_axis_name)  # (N, 3)
+    return axis_world[:, 2:3]  # world-Z component = cos(tilt from vertical)
+
+
+def object_tilt_penalty(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    upright_axis_name: str = "z",
+) -> torch.Tensor:
+    """Dense tilt penalty ``(num_envs,)`` in ``[-2, 0]`` — ``0`` when perfectly upright.
+
+    Returns ``uprightness - 1`` (see :func:`object_uprightness`). Apply with a POSITIVE
+    weight so the reward addend is ``weight * (cos_tilt - 1) <= 0``: zero cost while the
+    object stays vertical (no incentive to avoid the task / stand idle), growing cost as
+    it is knocked over — a smooth, on-manifold signal toward grasps that do not topple it.
+    Stays active through transport too, so it also discourages carrying the object tilted.
+    """
+    return object_uprightness(env, object_cfg, upright_axis_name).reshape(-1) - 1.0
+
+
 def object_position_in_static_frame(
     env: ManagerBasedRLEnv,
     frame_pos: tuple[float, float, float],

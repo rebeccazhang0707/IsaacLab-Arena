@@ -16,24 +16,28 @@ if TYPE_CHECKING:
     from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArenaEnvironment
 
 
-RANDOMIZATION_HALF_RANGE_X_M = 0.03
-RANDOMIZATION_HALF_RANGE_Y_M = 0.01
+RANDOMIZATION_HALF_RANGE_X_M = 0.05
+RANDOMIZATION_HALF_RANGE_Y_M = 0.03
 RANDOMIZATION_HALF_RANGE_Z_M = 0.0
 
 # --- RL reward-shaping knobs (task-owned) ----------------------------------------------------
 # Dense shaping signals for the pick-and-place phase, ADDED to the verl RL reward. They belong
-# to THIS task (they encode what "lifted"/"dropped" means for the ranch bottle on the kitchen
-# counter), so they live here rather than in the generic verl env wrapper. The verl side only
-# evaluates whatever reward terms get_rewards_cfg() declares (see arena_env._calc_shaping_reward)
+# to THIS task (they encode what "lifted"/"dropped"/"upright" means for the ranch bottle on the
+# kitchen counter), so they live here rather than in the generic verl env wrapper. The verl side
+# only evaluates whatever reward terms get_rewards_cfg() declares (see arena_env._calc_shaping_reward)
 # and routes them through a separate reward channel, so they do NOT affect success/done.
 #   * object_lifted: + reward while the bottle is raised >= LIFT_HEIGHT_M above its post-reset
 #     resting height (encourages a clean grasp + lift off the counter).
 #   * object_dropped: - penalty while the bottle has fallen to/below the floor (world z below the
 #     background's object_min_z), i.e. it was dropped.
+#   * object_upright: - penalty (continuous) as the bottle tilts from vertical, BEFORE it fully
+#     topples — the high-precision-grasp signal that pushes RL toward approach/grasp motions
+#     that do not knock the standing bottle over. Active through transport too.
 # Per-(chunk-)step continuous signals; keep the weights modest vs the +1 success reward.
 OBJECT_LIFTED_HEIGHT_M = 0.05
 OBJECT_LIFTED_REWARD_WEIGHT = 0.25
 OBJECT_DROPPED_PENALTY_WEIGHT = 0.5
+OBJECT_UPRIGHT_PENALTY_WEIGHT = 0.5
 
 
 class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
@@ -119,6 +123,7 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 class ShapingRewardsCfg:
                     object_lifted: RewardTermCfg = MISSING
                     object_dropped: RewardTermCfg = MISSING
+                    object_upright: RewardTermCfg = MISSING
 
                 rewards = ShapingRewardsCfg()
                 rewards.object_lifted = RewardTermCfg(
@@ -136,6 +141,14 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                         "object_cfg": SceneEntityCfg(self._pickup_object_name),
                         "minimum_height": self._object_min_z,
                     },
+                )
+                # Continuous tilt penalty: object_tilt_penalty returns (cos_tilt - 1) <= 0, so a
+                # POSITIVE weight yields weight*(cos_tilt-1) -- zero while upright, increasingly
+                # negative as the bottle is knocked over. Discourages topple-inducing grasps.
+                rewards.object_upright = RewardTermCfg(
+                    func=observations.object_tilt_penalty,
+                    weight=OBJECT_UPRIGHT_PENALTY_WEIGHT,
+                    params={"object_cfg": SceneEntityCfg(self._pickup_object_name)},
                 )
                 return rewards
 
@@ -315,7 +328,7 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
             def __init__(self, object_name: str, fridge_name: str, door_joint_name: str):
                 @configclass
                 class CriticPrivilegedCfg(ObsGroup):
-                    # Object pose (pos + quat = 7) in the fridge-shelf frame.
+                    # Object position (3) in the fridge-shelf frame.
                     object_pos = ObsTerm(
                         func=observations.object_position_in_static_frame,
                         params={
@@ -323,6 +336,14 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                             "frame_pos": shelf_pos,
                             "frame_quat_wxyz": shelf_quat_wxyz,
                         },
+                    )
+                    # Object uprightness (1): cos of tilt from vertical, yaw-invariant. Lets the
+                    # critic detect an incipient tip (and sharpen value near the topple boundary)
+                    # before the head camera shows it. Ordered before door_joint so the door
+                    # angle stays the LAST priv-obs dim (diagnostic logging assumes out[:, -1]).
+                    object_upright = ObsTerm(
+                        func=observations.object_uprightness,
+                        params={"object_cfg": SceneEntityCfg(object_name)},
                     )
                     # Fridge door joint angle (1), read live from the articulation.
                     door_joint = ObsTerm(

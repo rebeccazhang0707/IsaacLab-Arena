@@ -12,12 +12,53 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 
 
+def object_root_z(env: ManagerBasedRLEnv, object_cfg: SceneEntityCfg = SceneEntityCfg("object")) -> torch.Tensor:
+    """World-frame z of the object's root, ``(num_envs,)``."""
+    object: RigidObject = env.scene[object_cfg.name]
+    return wp.to_torch(object.data.root_pos_w)[:, 2]
+
+
 def object_is_lifted(
     env: ManagerBasedRLEnv, minimal_height: float, object_cfg: SceneEntityCfg = SceneEntityCfg("object")
 ) -> torch.Tensor:
     """Reward the agent for lifting the object above the minimal height."""
-    object: RigidObject = env.scene[object_cfg.name]
-    return torch.where(wp.to_torch(object.data.root_pos_w)[:, 2] > minimal_height, 1.0, 0.0)
+    return torch.where(object_root_z(env, object_cfg) > minimal_height, 1.0, 0.0)
+
+
+def object_lifted_above_reset(
+    env: ManagerBasedRLEnv,
+    lift_height: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    init_z_attr: str = "_object_init_z",
+) -> torch.Tensor:
+    """1 (per call) while the object is raised >= ``lift_height`` above its resting z.
+
+    Unlike :func:`object_is_lifted` (absolute world height), this measures the lift
+    RELATIVE to the object's per-env resting z captured at reset. Pair it with the
+    :func:`isaaclab_arena.tasks.events.capture_object_init_z` reset event (using the
+    same ``init_z_attr``), which caches the baseline on the env. The ``RewardTermCfg``
+    weight sets the magnitude. Returns ``(num_envs,)`` float (0/1), falling back to
+    zeros until the baseline is set.
+    """
+    z = object_root_z(env, object_cfg)
+    init_z = getattr(env, init_z_attr, None)
+    if init_z is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    return ((z - init_z) > lift_height).float()
+
+
+def object_dropped_below(
+    env: ManagerBasedRLEnv,
+    minimum_height: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """1 (per call) while the object has fallen below ``minimum_height`` (world z).
+
+    The directional counterpart of :func:`object_is_lifted`. Use a NEGATIVE
+    ``RewardTermCfg`` weight to turn it into a drop penalty. Returns ``(num_envs,)``
+    float (0/1).
+    """
+    return (object_root_z(env, object_cfg) < minimum_height).float()
 
 
 def object_goal_distance(

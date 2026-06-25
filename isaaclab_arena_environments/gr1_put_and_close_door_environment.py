@@ -20,6 +20,21 @@ RANDOMIZATION_HALF_RANGE_X_M = 0.03
 RANDOMIZATION_HALF_RANGE_Y_M = 0.01
 RANDOMIZATION_HALF_RANGE_Z_M = 0.0
 
+# --- RL reward-shaping knobs (task-owned) ----------------------------------------------------
+# Dense shaping signals for the pick-and-place phase, ADDED to the verl RL reward. They belong
+# to THIS task (they encode what "lifted"/"dropped" means for the ranch bottle on the kitchen
+# counter), so they live here rather than in the generic verl env wrapper. The verl side only
+# evaluates whatever reward terms get_rewards_cfg() declares (see arena_env._calc_shaping_reward)
+# and routes them through a separate reward channel, so they do NOT affect success/done.
+#   * object_lifted: + reward while the bottle is raised >= LIFT_HEIGHT_M above its post-reset
+#     resting height (encourages a clean grasp + lift off the counter).
+#   * object_dropped: - penalty while the bottle has fallen to/below the floor (world z below the
+#     background's object_min_z), i.e. it was dropped.
+# Per-(chunk-)step continuous signals; keep the weights modest vs the +1 success reward.
+OBJECT_LIFTED_HEIGHT_M = 0.05
+OBJECT_LIFTED_REWARD_WEIGHT = 0.25
+OBJECT_DROPPED_PENALTY_WEIGHT = 0.5
+
 
 class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
     """
@@ -37,13 +52,18 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
         from dataclasses import MISSING
 
         from isaaclab.envs.mimic_env_cfg import MimicEnvCfg
+        from isaaclab.managers import EventTermCfg
         from isaaclab.managers import ObservationGroupCfg as ObsGroup
         from isaaclab.managers import ObservationTermCfg as ObsTerm
-        from isaaclab.managers import SceneEntityCfg
+        from isaaclab.managers import RewardTermCfg, SceneEntityCfg
         from isaaclab.utils import configclass
+
+        from isaaclab_arena.utils.configclass import combine_configclass_instances
 
         from isaaclab_arena.assets.object_reference import ObjectReference, OpenableObjectReference
         from isaaclab_arena.tasks.observations import observations
+        from isaaclab_arena.tasks.events import capture_object_init_z
+        from isaaclab_arena.tasks.rewards.lift_object_rewards import object_dropped_below, object_lifted_above_reset
         from isaaclab_arena.assets.object_set import RigidObjectSet
         from isaaclab_arena.embodiments.common.arm_mode import ArmMode
         from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArenaEnvironment
@@ -68,6 +88,8 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 subtasks: list[TaskBase],
                 episode_length_s: float | None = None,
                 observation_cfg: object | None = None,
+                pickup_object_name: str | None = None,
+                object_min_z: float | None = None,
             ):
                 super().__init__(
                     subtasks=subtasks, episode_length_s=episode_length_s, desired_subtask_success_state=[True, True]
@@ -76,9 +98,67 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 # combine_configclass_instances(scene, embodiment, task) picks it up as an extra
                 # observation group; None ⇒ task contributes no observations (legacy behaviour).
                 self._observation_cfg = observation_cfg
+                # Pick-up object + floor threshold for the dense shaping rewards (see
+                # get_rewards_cfg / get_events_cfg). Both are properties of THIS task.
+                self._pickup_object_name = pickup_object_name
+                self._object_min_z = object_min_z
 
             def get_observation_cfg(self):
                 return self._observation_cfg
+
+            def get_rewards_cfg(self):
+                # Task-owned dense shaping for the pick-and-place phase: + while the bottle is
+                # lifted off the counter, - while it has been dropped to the floor. The verl RL
+                # wrapper routes these through a SEPARATE reward channel (they do not change
+                # success/done); pure-Arena eval/mimic just ignore the reward values. Disabled
+                # when the pick-up object name was not supplied (e.g. object_set).
+                if self._pickup_object_name is None:
+                    return None
+
+                @configclass
+                class ShapingRewardsCfg:
+                    object_lifted: RewardTermCfg = MISSING
+                    object_dropped: RewardTermCfg = MISSING
+
+                rewards = ShapingRewardsCfg()
+                rewards.object_lifted = RewardTermCfg(
+                    func=object_lifted_above_reset,
+                    weight=OBJECT_LIFTED_REWARD_WEIGHT,
+                    params={
+                        "object_cfg": SceneEntityCfg(self._pickup_object_name),
+                        "lift_height": OBJECT_LIFTED_HEIGHT_M,
+                    },
+                )
+                rewards.object_dropped = RewardTermCfg(
+                    func=object_dropped_below,
+                    weight=-OBJECT_DROPPED_PENALTY_WEIGHT,
+                    params={
+                        "object_cfg": SceneEntityCfg(self._pickup_object_name),
+                        "minimum_height": self._object_min_z,
+                    },
+                )
+                return rewards
+
+            def get_events_cfg(self):
+                # Combine the sequential-task events (subtask-state reset, etc.) with a reset
+                # event that captures the bottle's resting world-z as the per-env lift baseline
+                # used by object_lifted_reward. Task events run after scene/embodiment events
+                # (after the object is placed), so the baseline reflects the randomized start.
+                base_events = super().get_events_cfg()
+                if self._pickup_object_name is None:
+                    return base_events
+
+                @configclass
+                class ShapingEventsCfg:
+                    capture_object_init_z: EventTermCfg = MISSING
+
+                shaping_events = ShapingEventsCfg()
+                shaping_events.capture_object_init_z = EventTermCfg(
+                    func=capture_object_init_z,
+                    mode="reset",
+                    params={"object_cfg": SceneEntityCfg(self._pickup_object_name)},
+                )
+                return combine_configclass_instances("EventsCfg", base_events, shaping_events)
 
             def get_viewer_cfg(self):
                 return self.subtasks[0].get_viewer_cfg()
@@ -264,11 +344,17 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
             door_joint_name="fridge_door_joint",
         )
 
-        # Create sequential task
+        # Create sequential task. Pass the pick-up object + floor threshold so the task can
+        # declare its dense shaping rewards (object_lifted / object_dropped). Shaping is only
+        # wired for a single rigid object (skipped for --object_set, whose scene entity is a
+        # RigidObjectCollection with a different pose API).
+        shaping_object_name = None if (args_cli.object_set and len(args_cli.object_set) > 0) else pickup_object.name
         sequential_task = PutAndCloseDoorTask(
             subtasks=[pick_and_place_task, close_door_task],
             episode_length_s=10.0,
             observation_cfg=privileged_observation_cfg,
+            pickup_object_name=shaping_object_name,
+            object_min_z=kitchen_background.object_min_z,
         )
 
         # Create and return environment

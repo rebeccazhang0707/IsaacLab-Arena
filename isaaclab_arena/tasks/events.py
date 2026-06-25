@@ -9,12 +9,38 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING, Literal
 
+import warp as wp
 import isaaclab.utils.math as math_utils
 from isaaclab.managers import SceneEntityCfg
 from isaaclab_tasks.manager_based.manipulation.stack.mdp.franka_stack_events import sample_object_poses
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
+
+
+def capture_object_init_z(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    init_z_attr: str = "_object_init_z",
+):
+    """Reset event: cache the object's resting world-z per env as a lift baseline.
+
+    Declare as a task ``mode="reset"`` event so it runs on every ``env.reset()``
+    (after the object is placed). Pair it with
+    :func:`isaaclab_arena.tasks.rewards.lift_object_rewards.object_lifted_above_reset`
+    (using the same ``init_z_attr``), which reads this baseline so "lifted" is measured
+    relative to wherever the (randomized) object started.
+
+    Args:
+        object_cfg: Scene entity of the (rigid) object whose resting z is cached.
+        init_z_attr: Name of the per-env attribute set on ``env`` to hold the baseline.
+    """
+    object = env.scene[object_cfg.name]
+    z = wp.to_torch(object.data.root_pos_w)[:, 2]
+    if not hasattr(env, init_z_attr):
+        setattr(env, init_z_attr, z.clone())
+    getattr(env, init_z_attr)[env_ids] = z[env_ids]
 
 
 def randomize_poses_and_align_auxiliary_assets(

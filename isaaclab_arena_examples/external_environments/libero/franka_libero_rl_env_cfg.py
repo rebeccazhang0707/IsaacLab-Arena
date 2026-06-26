@@ -277,7 +277,7 @@ class AbsIKLiberoRLEnvCfg(ManagerBasedRLEnvCfg, CameraConfigFactory):
     scene: InteractiveSceneCfg = MISSING
     actions: ActionsCfg = ActionsCfg()
 
-    use_tiled_camera: bool = False
+    use_tiled_camera: bool = True
     camera_height: int = 224
     camera_width: int = 224
 

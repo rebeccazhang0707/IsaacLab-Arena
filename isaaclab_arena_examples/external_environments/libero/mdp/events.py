@@ -311,6 +311,18 @@ def _apply_initial_state_to_env(
                 articulation.write_root_velocity_to_sim(root_velocity, env_ids=env_tensor)
             if joint_position is not None and joint_velocity is not None:
                 joint_position = joint_position.clone()
+                if asset_name == "robot":
+                    # LIBERO/robosuite demos store the two prismatic Franka finger joints with
+                    # mirrored signs (finger1=+x, finger2=-x, both meaning "open at |x|"). The
+                    # Isaac Lab Franka defines both finger joints on [0, 0.04], so writing the raw
+                    # negative finger2 produces a lopsided, half-closed gripper at reset (one
+                    # finger open, the other clamped toward 0). Take the magnitude so the gripper
+                    # matches the symmetric open state the demo actually recorded.
+                    joint_names = list(articulation.data.joint_names)
+                    finger_ids = [i for i, name in enumerate(joint_names) if "finger" in name]
+                    if finger_ids:
+                        finger_idx = torch.tensor(finger_ids, device=joint_position.device, dtype=torch.long)
+                        joint_position[:, finger_idx] = joint_position[:, finger_idx].abs()
                 if asset_name == "robot" and robot_joint_noise_std > 0.0:
                     joint_position += torch.randn_like(joint_position) * float(robot_joint_noise_std)
                     local_idx = _local_env_index(articulation, env_idx)

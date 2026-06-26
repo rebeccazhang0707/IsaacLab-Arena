@@ -20,7 +20,7 @@ from .quat_utils import wxyz_to_xyzw
 class CameraConfigFactory:
     """Factory class providing camera configuration with TiledCamera support."""
 
-    use_tiled_camera: bool = False
+    use_tiled_camera: bool = True
     camera_height: int = 512
     camera_width: int = 512
 

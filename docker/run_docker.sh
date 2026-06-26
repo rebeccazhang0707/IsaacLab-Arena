@@ -13,6 +13,15 @@ DATASETS_HOST_MOUNT_DIRECTORY="$HOME/datasets"
 MODELS_HOST_MOUNT_DIRECTORY="$HOME/models"
 # Default mount directory on the host machine for the evaluation directory
 EVAL_HOST_MOUNT_DIRECTORY="$HOME/eval"
+# Host dir for the libero_in_lab checkout (benchmarks/datasets/libero/{config,USD,assembled_hdf5}),
+# bind-mounted to /libero_in_lab — the first candidate that the LIBERO external env auto-detects
+# (else LIBERO_IN_LAB_ROOT). Only mounted if it exists; override with LIBERO_IN_LAB_HOST_DIR.
+LIBERO_IN_LAB_HOST_DIRECTORY="${LIBERO_IN_LAB_HOST_DIR:-$HOME/Projects/libero_rl_example/libero_in_lab}"
+# Host dir for the LIBERO placeholder-prompt parquet, bind-mounted to the container user's
+# ~/data/libero_rl (the verl libero scripts' default TRAIN_FILES root is $HOME/data/libero_rl;
+# this container runs as a NON-root user, so $HOME=/home/<user>, not /root). Override with
+# LIBERO_RL_HOST_DIR.
+LIBERO_RL_HOST_DIRECTORY="${LIBERO_RL_HOST_DIR:-$HOME/iDataset/VLA/openpi/libero_rl}"
 # Default GR00T installation settings (false means no GR00T installation)
 INSTALL_GROOT="false"
 # Whether to forcefully rebuild the docker image
@@ -65,6 +74,10 @@ while getopts ":d:m:e:hn:rn:Rn:vn:gn:" OPTION; do
             echo "  -r (Force rebuilding of the docker image.)"
             echo "  -R (Force rebuilding of the docker image, without cache.)"
             echo "  -g (Install GR00T N1.6 dependencies.)"
+            echo ""
+            echo "Env-var mounts (only mounted if the host dir exists):"
+            echo "  LIBERO_IN_LAB_HOST_DIR -> /libero_in_lab        (default \"$LIBERO_IN_LAB_HOST_DIRECTORY\")"
+            echo "  LIBERO_RL_HOST_DIR     -> ~/data/libero_rl      (default \"$LIBERO_RL_HOST_DIRECTORY\")"
             exit 0
             ;;
         \?)
@@ -81,8 +94,13 @@ done
 # Shift off the processed options so that $@ has a command to pass to docker run
 shift $((OPTIND-1))
 
+# Container name. Defaults to "<image>-<tag>"; override CONTAINER_NAME to run a SECOND container
+# from the same image (e.g. a LIBERO test container alongside the GR1 ray container) without the
+# "already running -> attach" path reusing the existing one.
+CONTAINER_NAME="${CONTAINER_NAME:-$DOCKER_IMAGE_NAME-$DOCKER_VERSION_TAG}"
+
 # Display the values being used
-echo "Using Docker image: $DOCKER_IMAGE_NAME:$DOCKER_VERSION_TAG"
+echo "Using Docker image: $DOCKER_IMAGE_NAME:$DOCKER_VERSION_TAG (container: $CONTAINER_NAME)"
 
 # Build the Docker image with the specified or default name
 echo "Building Docker image with GR00T installation: $INSTALL_GROOT"
@@ -103,8 +121,8 @@ else
 fi
 
 # Remove any exited containers
-if [ "$(docker ps -a --quiet --filter status=exited --filter name=$DOCKER_IMAGE_NAME-$DOCKER_VERSION_TAG)" ]; then
-    docker rm $DOCKER_IMAGE_NAME-$DOCKER_VERSION_TAG > /dev/null
+if [ "$(docker ps -a --quiet --filter status=exited --filter name=$CONTAINER_NAME)" ]; then
+    docker rm $CONTAINER_NAME > /dev/null
 fi
 
 add_volume_if_it_exists() {
@@ -114,11 +132,11 @@ add_volume_if_it_exists() {
 }
 
 # If container is running, attach to it, otherwise start
-if [ "$( docker container inspect -f '{{.State.Running}}' $DOCKER_IMAGE_NAME'-'$DOCKER_VERSION_TAG 2>/dev/null)" = "true" ]; then
+if [ "$( docker container inspect -f '{{.State.Running}}' $CONTAINER_NAME 2>/dev/null)" = "true" ]; then
   echo "Container already running. Attaching."
-  docker exec -it $DOCKER_IMAGE_NAME-$DOCKER_VERSION_TAG su $(id -un)
+  docker exec -it $CONTAINER_NAME su $(id -un)
 else
-    DOCKER_RUN_ARGS=("--name" "$DOCKER_IMAGE_NAME-$DOCKER_VERSION_TAG"
+    DOCKER_RUN_ARGS=("--name" "$CONTAINER_NAME"
                     "--privileged"
                     "--ulimit" "memlock=-1"
                     "--ulimit" "stack=-1"
@@ -129,6 +147,8 @@ else
                     $(add_volume_if_it_exists $DATASETS_HOST_MOUNT_DIRECTORY /datasets)
                     $(add_volume_if_it_exists $MODELS_HOST_MOUNT_DIRECTORY /models)
                     $(add_volume_if_it_exists $EVAL_HOST_MOUNT_DIRECTORY /eval)
+                    $(add_volume_if_it_exists $LIBERO_IN_LAB_HOST_DIRECTORY /libero_in_lab)
+                    $(add_volume_if_it_exists $LIBERO_RL_HOST_DIRECTORY /home/$(id -un)/data/libero_rl)
                     "-v" "$HOME/.bash_history:/home/$(id -un)/.bash_history"
                     "-v" "$HOME/.config/osmo:/home/$(id -un)/.config/osmo"
                     "-v" "$HOME/.cache:/home/$(id -un)/.cache"

@@ -1,0 +1,34 @@
+# Copyright (c) 2025-2026, The Isaac Lab Arena Project Developers (https://github.com/isaac-sim/IsaacLab-Arena/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Franka Panda configuration for LIBERO (self-contained Arena port).
+
+Mirrors ``isaaclab_playground.assets.robots.franka:FRANKA_PANDA_LIBERO_HIGH_PD_CFG``.
+It derives from the shared ``isaaclab_assets`` Franka high-PD config (available in Arena)
+and applies the LIBERO-specific tweaks: stiffer arm PD, contact sensors, gravity disabled,
+LIBERO init joint pose and base offset.
+"""
+
+from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG
+
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG = FRANKA_PANDA_HIGH_PD_CFG.copy()
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.spawn.activate_contact_sensors = True
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].stiffness = 8000.0
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].damping = 800.0
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_forearm"].stiffness = 8000.0
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_forearm"].damping = 800.0
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.init_state.joint_pos = {
+    "panda_joint1": 0.0,
+    "panda_joint2": -0.569,
+    "panda_joint3": 0.0,
+    "panda_joint4": -2.810,
+    "panda_joint5": 0.0,
+    "panda_joint6": 3.037,
+    "panda_joint7": 0.741,
+    "panda_finger_joint.*": 0.04,
+}
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.init_state.pos = (-0.51, 0.0, 0.42)  # for libero living-room tabletop task
+"""Configuration of Franka Emika Panda robot with stiffer PD control for LIBERO task."""

@@ -105,6 +105,14 @@ RUN if [ "$INSTALL_GROOT" = "true" ]; then \
     echo "Skipping GR00T installation" && rm -f /etc/profile.d/groot_deps.sh; \
   fi && rm -f /tmp/install_gr00t_deps.sh
 
+# verl-only runtime dep needed on EVERY node — including the L20 sim nodes that merely run
+# `ray start` (verl imports codetiming at import time). It is pure-Python with no heavy deps, so
+# baking it here is safe (won't perturb the pinned torch/transformers/numpy). The verl launch
+# scripts still install it on the train node as a fallback for older images.
+RUN if [ "$INSTALL_GROOT" = "true" ]; then \
+    /isaac-sim/python.sh -m pip install codetiming; \
+  fi
+
 # Copy the rest of the files
 COPY *.* ${WORKDIR}/
 COPY isaaclab_arena ${WORKDIR}/isaaclab_arena

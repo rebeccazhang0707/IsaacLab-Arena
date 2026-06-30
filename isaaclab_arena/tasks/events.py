@@ -18,29 +18,33 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
-def capture_object_init_z(
+def capture_object_init_pos(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    init_z_attr: str = "_object_init_z",
+    init_pos_attr: str = "_object_init_pos",
 ):
-    """Reset event: cache the object's resting world-z per env as a lift baseline.
+    """Reset event: cache the object's resting world position (x, y, z) per env.
 
-    Declare as a task ``mode="reset"`` event so it runs on every ``env.reset()``
-    (after the object is placed). Pair it with
-    :func:`isaaclab_arena.tasks.rewards.lift_object_rewards.object_lifted_above_reset`
-    (using the same ``init_z_attr``), which reads this baseline so "lifted" is measured
-    relative to wherever the (randomized) object started.
+    Declare as a task ``mode="reset"`` event so it runs on every ``env.reset()`` (after the
+    object is placed at its randomized pose). Two consumers read this per-env baseline:
+
+    * :func:`isaaclab_arena.tasks.rewards.lift_object_rewards.object_lifted_above_reset`
+      uses the resting z (last column) so "lifted" is measured relative to wherever the
+      (randomized) object started.
+    * :func:`isaaclab_arena.tasks.observations.observations.object_tilt_penalty_near_init`
+      uses the full position so the tilt penalty is only applied while the object is still
+      within its initial pickup region on the table.
 
     Args:
-        object_cfg: Scene entity of the (rigid) object whose resting z is cached.
-        init_z_attr: Name of the per-env attribute set on ``env`` to hold the baseline.
+        object_cfg: Scene entity of the (rigid) object whose resting position is cached.
+        init_pos_attr: Name of the per-env attribute set on ``env`` to hold the ``(N, 3)`` pose.
     """
     object = env.scene[object_cfg.name]
-    z = wp.to_torch(object.data.root_pos_w)[:, 2]
-    if not hasattr(env, init_z_attr):
-        setattr(env, init_z_attr, z.clone())
-    getattr(env, init_z_attr)[env_ids] = z[env_ids]
+    pos = wp.to_torch(object.data.root_pos_w)[:, :3]
+    if not hasattr(env, init_pos_attr):
+        setattr(env, init_pos_attr, pos.clone())
+    getattr(env, init_pos_attr)[env_ids] = pos[env_ids]
 
 
 def randomize_poses_and_align_auxiliary_assets(

@@ -37,7 +37,15 @@ RANDOMIZATION_HALF_RANGE_Z_M = 0.0
 OBJECT_LIFTED_HEIGHT_M = 0.05
 OBJECT_LIFTED_REWARD_WEIGHT = 0.25
 OBJECT_DROPPED_PENALTY_WEIGHT = 0.5
-OBJECT_UPRIGHT_PENALTY_WEIGHT = 0.5
+OBJECT_UPRIGHT_PENALTY_WEIGHT = 0.25
+# Region around the object's RANDOMIZED INITIAL pose (captured at reset) within which the tilt
+# penalty is active: tilt is only penalized while the bottle is still at its on-table pickup
+# site (discouraging topple-inducing grasps). Once it is lifted / carried / placed in the
+# fridge it leaves this region and is no longer penalized — a bottle tilted in transit or lying
+# placed in the fridge (the success state) must not be penalized. Widen XY to cover the reset
+# randomization range plus a margin; keep Z tight so "lifted off the table" turns the penalty off.
+OBJECT_TILT_INIT_RADIUS_XY_M = 0.15
+OBJECT_TILT_INIT_RADIUS_Z_M = 0.10
 
 
 class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
@@ -66,7 +74,7 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
 
         from isaaclab_arena.assets.object_reference import ObjectReference, OpenableObjectReference
         from isaaclab_arena.tasks.observations import observations
-        from isaaclab_arena.tasks.events import capture_object_init_z
+        from isaaclab_arena.tasks.events import capture_object_init_pos
         from isaaclab_arena.tasks.rewards.lift_object_rewards import object_dropped_below, object_lifted_above_reset
         from isaaclab_arena.assets.object_set import RigidObjectSet
         from isaaclab_arena.embodiments.common.arm_mode import ArmMode
@@ -145,29 +153,40 @@ class GR1PutAndCloseDoorEnvironment(ExampleEnvironmentBase):
                 # Continuous tilt penalty: object_tilt_penalty returns (cos_tilt - 1) <= 0, so a
                 # POSITIVE weight yields weight*(cos_tilt-1) -- zero while upright, increasingly
                 # negative as the bottle is knocked over. Discourages topple-inducing grasps.
+                # GATED to the object's initial on-table pickup region (captured at reset by the
+                # capture_object_init_pos event): the penalty only applies while the bottle is at
+                # its pickup site, and switches off once it is lifted / carried / placed in the
+                # fridge — so a bottle tilted in transit or lying placed in the fridge (success)
+                # is NOT penalized, which previously drove successful trajectories' Q < 0.
                 rewards.object_upright = RewardTermCfg(
-                    func=observations.object_tilt_penalty,
+                    func=observations.object_tilt_penalty_near_init,
                     weight=OBJECT_UPRIGHT_PENALTY_WEIGHT,
-                    params={"object_cfg": SceneEntityCfg(self._pickup_object_name)},
+                    params={
+                        "object_cfg": SceneEntityCfg(self._pickup_object_name),
+                        "init_radius_xy": OBJECT_TILT_INIT_RADIUS_XY_M,
+                        "init_radius_z": OBJECT_TILT_INIT_RADIUS_Z_M,
+                    },
                 )
                 return rewards
 
             def get_events_cfg(self):
-                # Combine the sequential-task events (subtask-state reset, etc.) with a reset
-                # event that captures the bottle's resting world-z as the per-env lift baseline
-                # used by object_lifted_reward. Task events run after scene/embodiment events
-                # (after the object is placed), so the baseline reflects the randomized start.
+                # Combine the sequential-task events (subtask-state reset, etc.) with a reset event
+                # that caches the bottle's resting world position per env. It is the shared baseline
+                # for BOTH the lift reward (object_lifted_above_reset reads its z) and the gated tilt
+                # penalty (object_tilt_penalty_near_init reads the full pose). Task events run after
+                # scene/embodiment events (after the object is placed), so it reflects the randomized
+                # start.
                 base_events = super().get_events_cfg()
                 if self._pickup_object_name is None:
                     return base_events
 
                 @configclass
                 class ShapingEventsCfg:
-                    capture_object_init_z: EventTermCfg = MISSING
+                    capture_object_init_pos: EventTermCfg = MISSING
 
                 shaping_events = ShapingEventsCfg()
-                shaping_events.capture_object_init_z = EventTermCfg(
-                    func=capture_object_init_z,
+                shaping_events.capture_object_init_pos = EventTermCfg(
+                    func=capture_object_init_pos,
                     mode="reset",
                     params={"object_cfg": SceneEntityCfg(self._pickup_object_name)},
                 )

@@ -140,3 +140,39 @@ def object_position_in_static_frame(
     frame_quat_w = torch.tensor(frame_quat_wxyz, device=device, dtype=dtype).unsqueeze(0).expand(num_envs, 4)
     object_pos_f, _ = subtract_frame_transforms(frame_pos_w, frame_quat_w, object_pos_w, object_quat_w)
     return object_pos_f
+
+
+def object_tilt_penalty_near_init(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    init_pos_attr: str = "_object_init_pos",
+    init_radius_xy: float = 0.15,
+    init_radius_z: float = 0.10,
+    upright_axis_name: str = "z",
+) -> torch.Tensor:
+    """Tilt penalty (see :func:`object_tilt_penalty`) GATED to the object's initial pose range.
+
+    Returns the same dense ``(cos_tilt - 1) <= 0`` signal as :func:`object_tilt_penalty`, but
+    only while the object is still within the on-table region where it was reset; it yields
+    ``0`` once the object leaves that region (lifted, carried, or placed in the fridge). The
+    point is to penalize ONLY topple-inducing grasps at the pickup site — a bottle tilted in
+    transit or lying placed in the fridge (the success state) must not be penalized, else the
+    value of successful trajectories is driven negative and avoidance is rewarded.
+
+    The per-env initial world position is cached at reset by
+    :func:`isaaclab_arena.tasks.events.capture_object_init_pos` under ``init_pos_attr``. The
+    object counts as "near init" when its displacement from that pose is within
+    ``init_radius_xy`` horizontally AND ``init_radius_z`` vertically. Falls back to zeros until
+    the baseline is set.
+    """
+    penalty = object_tilt_penalty(env, object_cfg, upright_axis_name)  # (N,) in [-2, 0]
+    init_pos = getattr(env, init_pos_attr, None)
+    if init_pos is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    obj: RigidObject = env.scene[object_cfg.name]
+    pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
+    displacement = pos_w - init_pos
+    horizontal = torch.norm(displacement[:, :2], dim=-1)
+    vertical = displacement[:, 2].abs()
+    near_init = (horizontal < init_radius_xy) & (vertical < init_radius_z)
+    return torch.where(near_init, penalty, torch.zeros_like(penalty))

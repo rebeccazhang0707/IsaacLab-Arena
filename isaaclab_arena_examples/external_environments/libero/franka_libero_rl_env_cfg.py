@@ -152,7 +152,11 @@ class RLObservationsCfg:
 
         def __post_init__(self):
             self.enable_corruption = True
-            self.concatenate_terms = True
+            # Keep per-camera tensors (do NOT flatten/concatenate images into one vector). verl
+            # reads cameras directly from the scene sensors and ignores this group, while the
+            # Arena policy_runner path (Gr00tLiberoClosedloopPolicy) needs per-camera RGB to map
+            # each image onto its GR00T video modality key (agentview_cam / eye_in_hand_cam).
+            self.concatenate_terms = False
 
     policy: PolicyCfg = PolicyCfg()
     rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()

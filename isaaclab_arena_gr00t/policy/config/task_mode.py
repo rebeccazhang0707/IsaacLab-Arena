@@ -11,3 +11,7 @@ class TaskMode(Enum):
     G1_LOCOMANIPULATION = "g1_locomanipulation"
     GR1_TABLETOP_MANIPULATION = "gr1_tabletop_manipulation"
     DROID_MANIPULATION = "droid_manipulation"
+    # Franka LIBERO Abs-IK end-effector control (pos + axis-angle rotvec + gripper). Unlike the
+    # joint-space modes above, this mode's policy I/O is end-effector pose based, handled by
+    # Gr00tLiberoClosedloopPolicy (no joint remapping / joint configs).
+    FRANKA_LIBERO_MANIPULATION = "franka_libero_manipulation"

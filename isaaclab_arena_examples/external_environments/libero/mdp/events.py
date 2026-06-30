@@ -416,6 +416,19 @@ def reset_libero_scene_to_initial_state(
         assignment = decode_task_assignment(assignment_raw)
         envs_by_assignment.setdefault(assignment, []).append(env_idx)
 
+    # Deterministic 50-init eval (gated by LIBERO_DETERMINISTIC_INIT): instead of randomly
+    # sampling a demo per reset, walk the HDF5 demo indices in order via a per-assignment cursor
+    # stored on the env, so consecutive full resets cover every demo exactly once (no random
+    # sampling, reproducible). Default (env var unset) keeps the original random sampling, so
+    # training / rollout behaviour is unchanged.
+    deterministic_init = os.getenv("LIBERO_DETERMINISTIC_INIT", "").lower() in ("1", "true", "t", "yes")
+    demo_cursors = None
+    if deterministic_init:
+        demo_cursors = getattr(env, "_libero_demo_cursors", None)
+        if demo_cursors is None:
+            demo_cursors = {}
+            setattr(env, "_libero_demo_cursors", demo_cursors)
+
     reservations: dict[int, dict[str, dict[str, dict[str, torch.Tensor]]] | None] = {}
     for assignment, env_list in envs_by_assignment.items():
         cache_key = (datasets_root, assignment)
@@ -427,7 +440,16 @@ def reset_libero_scene_to_initial_state(
         if not states:
             continue
 
-        demo_indices = torch.randint(0, len(states), (len(env_list),), device=env.device)
+        if deterministic_init:
+            cursor = demo_cursors.get(assignment, 0)
+            demo_indices = torch.tensor(
+                [(cursor + i) % len(states) for i in range(len(env_list))],
+                device=env.device,
+                dtype=torch.long,
+            )
+            demo_cursors[assignment] = cursor + len(env_list)
+        else:
+            demo_indices = torch.randint(0, len(states), (len(env_list),), device=env.device)
         for idx, env_idx in enumerate(env_list):
             state = states[int(demo_indices[idx].item())]
             reservations[env_idx] = _clone_initial_state_dict(state)

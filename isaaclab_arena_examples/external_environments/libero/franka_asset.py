@@ -20,6 +20,11 @@ FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].stiffness = 8000.0
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].damping = 800.0
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_forearm"].stiffness = 8000.0
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_forearm"].damping = 800.0
+# Reset actuator cfg back to Isaac Lab 2.3: the only actuator-level change from Lab 2.3 to Lab 3.0
+# was Lab 3.0 adding ``armature=1e-3`` on the arm joints. Lab 2.3 left armature unset (None), which
+# falls back to the value baked into the USD joint prim. Restore that to match Lab 2.3 dynamics.
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].armature = None
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_forearm"].armature = None
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.init_state.joint_pos = {
     "panda_joint1": 0.0,
     "panda_joint2": -0.569,

@@ -13,14 +13,10 @@ DATASETS_HOST_MOUNT_DIRECTORY="$HOME/datasets"
 MODELS_HOST_MOUNT_DIRECTORY="$HOME/models"
 # Default mount directory on the host machine for the evaluation directory
 EVAL_HOST_MOUNT_DIRECTORY="$HOME/eval"
-# Host dir for the libero_in_lab checkout (benchmarks/datasets/libero/{config,USD,assembled_hdf5}),
-# bind-mounted to /libero_in_lab — the first candidate that the LIBERO external env auto-detects
-# (else LIBERO_IN_LAB_ROOT). Only mounted if it exists; override with LIBERO_IN_LAB_HOST_DIR.
-LIBERO_IN_LAB_HOST_DIRECTORY="${LIBERO_IN_LAB_HOST_DIR:-$HOME/Projects/libero_rl_example/libero_in_lab}"
 # Host dir for the LIBERO placeholder-prompt parquet, bind-mounted to the container user's
-# ~/data/libero_rl (the verl libero scripts' default TRAIN_FILES root is $HOME/data/libero_rl;
-# this container runs as a NON-root user, so $HOME=/home/<user>, not /root). Override with
-# LIBERO_RL_HOST_DIR.
+# ~/data/libero_prompts (the verl libero scripts' default TRAIN_FILES root is
+# $HOME/data/libero_prompts; this container runs as a NON-root user, so $HOME=/home/<user>, not
+# /root). Override with LIBERO_RL_HOST_DIR.
 LIBERO_RL_HOST_DIRECTORY="${LIBERO_RL_HOST_DIR:-$HOME/iDataset/VLA/openpi/libero_rl}"
 # Default GR00T installation settings (false means no GR00T installation)
 INSTALL_GROOT="false"
@@ -76,8 +72,7 @@ while getopts ":d:m:e:hn:rn:Rn:vn:gn:" OPTION; do
             echo "  -g (Install GR00T N1.6 dependencies.)"
             echo ""
             echo "Env-var mounts (only mounted if the host dir exists):"
-            echo "  LIBERO_IN_LAB_HOST_DIR -> /libero_in_lab        (default \"$LIBERO_IN_LAB_HOST_DIRECTORY\")"
-            echo "  LIBERO_RL_HOST_DIR     -> ~/data/libero_rl      (default \"$LIBERO_RL_HOST_DIRECTORY\")"
+            echo "  LIBERO_RL_HOST_DIR     -> ~/data/libero_prompts (default \"$LIBERO_RL_HOST_DIRECTORY\")"
             exit 0
             ;;
         \?)
@@ -147,8 +142,7 @@ else
                     $(add_volume_if_it_exists $DATASETS_HOST_MOUNT_DIRECTORY /datasets)
                     $(add_volume_if_it_exists $MODELS_HOST_MOUNT_DIRECTORY /models)
                     $(add_volume_if_it_exists $EVAL_HOST_MOUNT_DIRECTORY /eval)
-                    $(add_volume_if_it_exists $LIBERO_IN_LAB_HOST_DIRECTORY /libero_in_lab)
-                    $(add_volume_if_it_exists $LIBERO_RL_HOST_DIRECTORY /home/$(id -un)/data/libero_rl)
+                    $(add_volume_if_it_exists $LIBERO_RL_HOST_DIRECTORY /home/$(id -un)/data/libero_prompts)
                     "-v" "$HOME/.bash_history:/home/$(id -un)/.bash_history"
                     "-v" "$HOME/.config/osmo:/home/$(id -un)/.config/osmo"
                     "-v" "$HOME/.cache:/home/$(id -un)/.cache"

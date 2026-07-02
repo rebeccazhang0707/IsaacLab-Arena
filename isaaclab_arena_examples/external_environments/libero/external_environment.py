@@ -44,6 +44,12 @@ from isaaclab_arena_environments.example_environment_base import ExampleEnvironm
 # verl's isaac_env.py so the same env works across the root / non-root container layouts.
 _LIBERO_ROOT_CANDIDATES = ("/libero_in_lab", "/root/libero_in_lab")
 
+# Colocated LIBERO data embedded inside this package
+# (``external_environments/libero/data/{config,USD,assembled_hdf5}``). Resolved relative to
+# this module file so a local (non-docker) checkout works out of the box, independent of CWD.
+# This is the lowest-precedence fallback (explicit env/CLI and /libero_in_lab mounts win).
+_COLOCATED_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
 
 def _resolve_libero_root() -> str | None:
     """Find the libero_in_lab root: explicit env var, else first candidate that has the config dir."""
@@ -141,13 +147,17 @@ class LiberoEnvironment(ExampleEnvironmentBase):
         os.environ["LIBERO_RANDOMIZE_OBJECT_POSE"] = "True" if args_cli.randomize_object_pose else "False"
         os.environ["ROBOT_INIT_NOISE_STD"] = str(args_cli.robot_init_noise_std)
 
-        # Dataset / asset directories. Explicit CLI overrides win; otherwise derive from the
-        # resolved libero_in_lab root if the caller did not already export them.
+        # Dataset / asset directories. Precedence (high -> low):
+        #   explicit CLI flag > pre-set env var > /libero_in_lab mount > colocated `data/` dir.
+        # ``setdefault`` keeps any pre-existing env var, and the colocated default ensures a
+        # local (non-docker) checkout resolves the embedded data even without a mount.
         libero_root = self._resolve_libero_dirs(args_cli)
         if args_cli.libero_config_dir:
             os.environ["LIBERO_CONFIG_DIR"] = args_cli.libero_config_dir
         elif libero_root:
             os.environ.setdefault("LIBERO_CONFIG_DIR", os.path.join(libero_root, "benchmarks/datasets/libero/config"))
+        else:
+            os.environ.setdefault("LIBERO_CONFIG_DIR", os.path.join(_COLOCATED_DATA_DIR, "config"))
 
         if args_cli.libero_assets_dir:
             os.environ["LIBERO_ASSETS_DATA_DIR"] = args_cli.libero_assets_dir
@@ -155,6 +165,8 @@ class LiberoEnvironment(ExampleEnvironmentBase):
             os.environ.setdefault(
                 "LIBERO_ASSETS_DATA_DIR", os.path.join(libero_root, "benchmarks/datasets/libero/USD")
             )
+        else:
+            os.environ.setdefault("LIBERO_ASSETS_DATA_DIR", os.path.join(_COLOCATED_DATA_DIR, "USD"))
 
         if args_cli.libero_assembled_dataset_dir:
             os.environ["LIBERO_ASSEMBLED_DATASET_DIR"] = args_cli.libero_assembled_dataset_dir
@@ -162,6 +174,10 @@ class LiberoEnvironment(ExampleEnvironmentBase):
             os.environ.setdefault(
                 "LIBERO_ASSEMBLED_DATASET_DIR",
                 os.path.join(libero_root, "benchmarks/datasets/libero/assembled_hdf5"),
+            )
+        else:
+            os.environ.setdefault(
+                "LIBERO_ASSEMBLED_DATASET_DIR", os.path.join(_COLOCATED_DATA_DIR, "assembled_hdf5")
             )
 
     @staticmethod

@@ -34,13 +34,20 @@ from isaaclab.utils import configclass
 
 from isaaclab_tasks.manager_based.manipulation.stack.mdp import franka_stack_events
 
+# Colocated LIBERO data embedded inside this external-env package
+# (``external_environments/libero/data/{config,USD,assembled_hdf5}``). Resolved relative to
+# this module file so a local (non-docker) run works out of the box, independent of CWD.
+# Precedence is still: explicit env var > /libero_in_lab mount (set by external_environment.py)
+# > this colocated default.
+_LIBERO_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
 
 @configclass
 class LiberoTaskConfig:
     """Configuration for Libero task parameters (single task selected via env vars)."""
 
-    config_dir: str = os.getenv("LIBERO_CONFIG_DIR", os.path.abspath("benchmarks/datasets/libero/config"))
-    assets_dir: str = os.getenv("LIBERO_ASSETS_DATA_DIR", os.path.abspath("benchmarks/datasets/libero/USD"))
+    config_dir: str = os.getenv("LIBERO_CONFIG_DIR", os.path.join(_LIBERO_DATA_DIR, "config"))
+    assets_dir: str = os.getenv("LIBERO_ASSETS_DATA_DIR", os.path.join(_LIBERO_DATA_DIR, "USD"))
 
     def __post_init__(self):
         # Load task info

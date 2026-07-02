@@ -47,6 +47,7 @@ from .franka_asset import FRANKA_PANDA_LIBERO_HIGH_PD_CFG  # isort: skip
 from isaaclab.managers import EventTermCfg as EventTerm
 
 from .franka_libero_base_cfg import (
+    _LIBERO_DATA_DIR,
     LiberoTaskConfig,
     EventCfgFrankaPanda,  # noqa: F401
     ActionsCfg,
@@ -214,7 +215,7 @@ class RLEventCfgFrankaPanda:
             params={
                 "datasets_root": os.getenv(
                     "LIBERO_ASSEMBLED_DATASET_DIR",
-                    os.path.abspath("benchmarks/datasets/libero/assembled_hdf5"),
+                    os.path.join(_LIBERO_DATA_DIR, "assembled_hdf5"),
                 ),
                 "include_articulations": True,
                 "include_rigid_objects": True,

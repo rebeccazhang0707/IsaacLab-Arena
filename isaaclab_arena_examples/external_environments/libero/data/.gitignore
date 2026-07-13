@@ -1,0 +1,5 @@
+# Embedded LIBERO binaries are large; keep them as untracked working-tree files only.
+# (Migrated from libero_in_lab/benchmarks/datasets/libero/ — see repo-root MIGRATION_NOTES.md.)
+# The small config/ JSONs and reference helper scripts here are safe to track.
+USD/
+assembled_hdf5/

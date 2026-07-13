@@ -8,11 +8,12 @@
 # gr1_manip_*_gr00t_closedloop_config.yaml files.
 #
 # The LIBERO `rel_rotvec` checkpoint (embodiment_tag new_embodiment) uses:
-#   - video keys : agentview_cam, eye_in_hand_cam  (== the env's RGB camera obs terms)
+#   - video keys : agentview_cam, eye_in_hand_cam  (GR00T modality keys)
 #   - state keys : franka_eef_pose (pos3 + rotvec3), franka_gripper_pos (first finger)
 #   - action keys: franka_eef_pose (ABSOLUTE pos3 + rotvec3, relative->absolute decoded inside
 #                  the GR00T processor), franka_gripper_pos
 # The policy converts these to the env's 8-D Abs-IK action (pos3 + quat_xyzw4 + gripper1).
+# Env camera obs terms follow the Arena G1/GR1 convention (`*_rgb` under `camera_obs`).
 
 # Point this at the rel_rotvec LIBERO checkpoint. Host path shown; inside the Arena GR00T
 # container the same checkpoint is typically mounted at /models/checkpoint-10000.
@@ -30,10 +31,12 @@ action_chunk_length: 16
 
 # Arena `libero` env observation layout (franka_libero_rl_env_cfg::RLObservationsCfg):
 #   - `policy` group concatenates [eef_pose(7=pos3+quat_xyzw4), gripper_pos(2 fingers)].
-#   - `rgb_camera` group holds the per-camera RGB images (concatenate_terms=False).
+#   - `camera_obs` group holds per-camera RGB (`*_rgb` keys, concatenate_terms=False).
 state_obs_group_key: policy
-camera_obs_group_key: rgb_camera
-# Empty -> identity: the env camera obs term name equals the GR00T video modality key.
-camera_obs_to_video_key: {}
+camera_obs_group_key: camera_obs
+# Map GR00T video modality keys -> env camera_obs term names.
+camera_obs_to_video_key:
+  agentview_cam: agentview_cam_rgb
+  eye_in_hand_cam: eye_in_hand_cam_rgb
 
 task_mode_name: franka_libero_manipulation

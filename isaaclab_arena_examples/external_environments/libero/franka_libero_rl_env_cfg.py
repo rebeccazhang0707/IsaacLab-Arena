@@ -96,6 +96,18 @@ _RIGID_BODY_PRIM_NAMES: dict[str, str] = {
     "wooden_cabinet_1": "wooden_cabinet_1/wooden_cabinet_base_col/wooden_cabinet_base_col",
 }
 
+# Per-suite episode horizon (seconds). The horizon is a property of the LIBERO task
+# suite, not a caller-supplied knob: LIBERO episodes are short, fixed-horizon
+# manipulation tasks, so the env cfg owns the value
+_EPISODE_LENGTH_S_BY_SUITE: dict[str, float] = {"libero_10": 26.0}
+_DEFAULT_EPISODE_LENGTH_S: float = 10.0
+
+
+def episode_length_s_for_suite(task_suite: str) -> float:
+    """Return the episode horizon (s) the given LIBERO task suite defines."""
+    return _EPISODE_LENGTH_S_BY_SUITE.get(task_suite, _DEFAULT_EPISODE_LENGTH_S)
+
+
 # Default object rigid-body properties
 _OBJECT_RIGID_PROPS = RigidBodyPropertiesCfg(
     solver_position_iteration_count=16,
@@ -114,9 +126,16 @@ _OBJECT_RIGID_PROPS = RigidBodyPropertiesCfg(
 
 @configclass
 class RLObservationsCfg:
-    """Minimal observations for VLA RL: state values consumed by verl's _extract_image_and_state.
+    """Minimal observations for VLA RL / Arena GR00T closed-loop.
 
-    Camera images are read directly from the scene sensors by verl, not via obs terms.
+    Layout matches the G1/GR1 Arena convention so consumers can share one abstraction:
+
+    - ``policy``: concatenated eef_pose(7) + gripper_pos(2) Box (task-space state).
+    - ``camera_obs``: per-camera RGB dict with ``{sensor}_{dtype}`` keys
+      (``agentview_cam_rgb``, ``eye_in_hand_cam_rgb``), ``concatenate_terms=False``.
+
+    Scene entity names stay ``agentview_cam`` / ``eye_in_hand_cam``; only the obs-term
+    field names carry the ``_rgb`` suffix (same as ``make_camera_observation_cfg``).
     """
 
     @configclass
@@ -130,10 +149,10 @@ class RLObservationsCfg:
             self.concatenate_terms = True
 
     @configclass
-    class RGBCameraPolicyCfg(ObsGroup):
-        """Observations for policy group with RGB images."""
+    class CameraObsCfg(ObsGroup):
+        """Per-camera RGB group aligned with Arena ``camera_obs`` / ``*_rgb`` naming."""
 
-        agentview_cam = ObsTerm(
+        agentview_cam_rgb = ObsTerm(
             func=mdp.image,  # type: ignore[attr-defined]
             params={
                 "sensor_cfg": SceneEntityCfg("agentview_cam"),
@@ -141,7 +160,7 @@ class RLObservationsCfg:
                 "normalize": False,
             },
         )
-        eye_in_hand_cam = ObsTerm(
+        eye_in_hand_cam_rgb = ObsTerm(
             func=mdp.image,  # type: ignore[attr-defined]
             params={
                 "sensor_cfg": SceneEntityCfg("eye_in_hand_cam"),
@@ -152,14 +171,11 @@ class RLObservationsCfg:
 
         def __post_init__(self):
             self.enable_corruption = True
-            # Keep per-camera tensors (do NOT flatten/concatenate images into one vector). verl
-            # reads cameras directly from the scene sensors and ignores this group, while the
-            # Arena policy_runner path (Gr00tLiberoClosedloopPolicy) needs per-camera RGB to map
-            # each image onto its GR00T video modality key (agentview_cam / eye_in_hand_cam).
+            # Keep per-camera tensors (do NOT flatten/concatenate images into one vector).
             self.concatenate_terms = False
 
     policy: PolicyCfg = PolicyCfg()
-    rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
+    camera_obs: CameraObsCfg = CameraObsCfg()
 
 
 ##
@@ -168,9 +184,22 @@ class RLObservationsCfg:
 
 @configclass
 class RLTerminationsCfg:
-    """Termination terms for VLA RL post-training."""
+    """Termination terms for VLA RL post-training.
+
+    Must include a ``success`` DoneTerm (same predicate as the sparse reward): LIBERO
+    otherwise only ends via ``time_out``, so a solved episode keeps stepping until the
+    horizon and reports ``truncated=True, terminated=False`` even though
+    ``libero_goals_reached`` already fired. Mirrors the IL ``TerminationsCfg.success``.
+    """
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
+
+    def __post_init__(self):
+        libero_config = LiberoTaskConfig()
+        self.success = DoneTerm(
+            func=mdp.libero_goals_reached,
+            params={"goals": libero_config.goals},
+        )
 
 ##
 # Rewards
@@ -310,7 +339,10 @@ class AbsIKLiberoRLEnvCfg(ManagerBasedRLEnvCfg, CameraConfigFactory):
         self.sim.dt = 1 / 60
         self.sim.render_interval = 3
         self.decimation = 3
-        self.episode_length_s = 100.0  # disable auto-reset for verl
+        # Episode horizon is defined by the LIBERO task suite (short fixed-horizon tasks),
+        # so the sim owns per-step ``time_out`` auto-reset. One rollout pass that runs the
+        # full horizon (e.g. 160 steps @ 8 s for libero_spatial) covers exactly one episode.
+        self.episode_length_s = episode_length_s_for_suite(self.libero_config.task_suite)
 
         # Isaac Lab 3.0 moved PhysX params from SimulationCfg.physx to SimulationCfg.physics
         # (a PhysxCfg, default None). Fall back to .physx on Isaac Lab 2.x.

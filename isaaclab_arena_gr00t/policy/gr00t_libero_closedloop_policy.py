@@ -140,14 +140,16 @@ class Gr00tLiberoClosedloopPolicyConfig:
         default="policy", metadata={"description": "Observation group holding the concatenated eef_pose + gripper."}
     )
     camera_obs_group_key: str = field(
-        default="rgb_camera", metadata={"description": "Observation group holding the per-camera RGB images."}
+        default="camera_obs",
+        metadata={"description": "Observation group holding the per-camera RGB images (Arena camera_obs convention)."},
     )
     camera_obs_to_video_key: dict = field(
         default_factory=dict,
         metadata={
             "description": (
-                "Optional map {env_camera_obs_term -> gr00t_video_key}. Empty -> identity (the env camera obs term"
-                " name equals the gr00t video modality key, as is the case for the LIBERO checkpoint)."
+                "Optional map {gr00t_video_key -> env_camera_obs_term}. Empty -> identity. For the Arena"
+                " LIBERO env the terms are `*_rgb` under `camera_obs`, so the closed-loop yaml maps"
+                " agentview_cam -> agentview_cam_rgb (and likewise for eye_in_hand)."
             )
         },
     )
@@ -316,7 +318,7 @@ class Gr00tLiberoClosedloopPolicy(PolicyBase):
         eef_rotvec = _quat_xyzw_to_axisangle(eef_quat_xyzw)
         franka_eef_pose = np.concatenate([eef_pos, eef_rotvec], axis=-1).astype(np.float32)  # (N, 6)
 
-        # --- video: per-camera images from the rgb_camera group (concatenate_terms must be False) ---
+        # --- video: per-camera images from the camera_obs group (concatenate_terms must be False) ---
         camera_group = observation[self.policy_config.camera_obs_group_key]
         assert isinstance(camera_group, dict), (
             f"Expected '{self.policy_config.camera_obs_group_key}' obs to be a per-camera dict; got"

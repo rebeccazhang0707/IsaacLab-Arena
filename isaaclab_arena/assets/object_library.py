@@ -1326,6 +1326,28 @@ class RanchDressingHopeRobolab(LibraryObject):
     tags = ["object", "graspable", "food", "robolab"]
     usd_path = f"{ISAACLAB_NUCLEUS_DIR}/Arena/assets/object_library/srl_robolab_assets/objects/hope/ranch_dressing.usd"
     scale = (0.8, 0.8, 1.2)
+    # Grasp-contact hardening: on GPU dynamics PhysX CCD is force-disabled, so finger/bottle
+    # interpenetration must be fixed on the contact-solve side, not via CCD. We (a) raise the
+    # position-solver iteration count so the TGS solver actually resolves the squeezing contact,
+    # (b) allow a faster depenetration velocity so residual overlap is pushed out within a step,
+    # (c) add a small contact_offset so contacts are generated before deep overlap, and (d) raise
+    # friction so a stable grasp needs less penetration. Attached here (property of THIS bottle),
+    # threaded into RigidObjectCfg.spawn by Object._generate_rigid_cfg via spawn_cfg_addon.
+    spawn_cfg_addon = {
+        "rigid_props": sim_utils.RigidBodyPropertiesCfg(
+            max_depenetration_velocity=5.0,
+            solver_position_iteration_count=32,
+            solver_velocity_iteration_count=1,
+        ),
+        "collision_props": sim_utils.CollisionPropertiesCfg(
+            contact_offset=0.008,
+            rest_offset=0.0,
+        ),
+        "physics_material": sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.9,
+            dynamic_friction=0.9,
+        ),
+    }
 
 
 @register_asset

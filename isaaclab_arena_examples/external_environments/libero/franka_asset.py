@@ -11,9 +11,18 @@ and applies the LIBERO-specific tweaks: stiffer arm PD, contact sensors, gravity
 LIBERO init joint pose and base offset.
 """
 
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab_assets.robots.franka import FRANKA_PANDA_HIGH_PD_CFG
 
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG = FRANKA_PANDA_HIGH_PD_CFG.copy()
+# The inherited config points at Robots/FrankaEmika/panda_instanceable.usd, which
+# the Isaac 6.0 asset tree no longer publishes after the robot library was
+# reorganized; fetching it fails with HTTP 404 during scene construction. The
+# Panda now ships under Robots/FrankaRobotics/FrankaPanda, the same path
+# isaaclab_assets already uses for FRANKA_ROBOTIQ_GRIPPER_CFG.
+FRANKA_PANDA_LIBERO_HIGH_PD_CFG.spawn.usd_path = (
+    f"{ISAAC_NUCLEUS_DIR}/Robots/FrankaRobotics/FrankaPanda/franka.usd"
+)
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.spawn.activate_contact_sensors = True
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
 FRANKA_PANDA_LIBERO_HIGH_PD_CFG.actuators["panda_shoulder"].stiffness = 8000.0
